@@ -33,6 +33,16 @@ define([
         "use strict";
 
         var show_notebook_settings_dialog = function () {
+            if (!('jupytext' in Jupyter.notebook.metadata))
+                Jupyter.notebook.metadata.jupytext = {};
+
+            var jpmd = Jupyter.notebook.metadata.jupytext;
+
+            var notebook_path = Jupyter.notebook.notebook_path;
+            var notebook_ext = notebook_path.split('.').pop().toLowerCase();
+            var script_ext = Jupyter.notebook.metadata.language_info.file_extension;
+            var script_language = Jupyter.notebook.metadata.language_info.name;
+            script_language = script_language[0].toUpperCase() + script_language.substr(1);
 
             var modal = $('<div class="modal fade" role="dialog"/>');
             var dialog_content = $("<div/>")
@@ -40,52 +50,86 @@ define([
                 .appendTo($('<div class="modal-dialog">').appendTo(modal));
             $('<div class="modal-header">')
                 .append('<button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>')
-                .append('<h3 class="modal-title">Jupytext configuration for the current notebook</h3>')
+                .append(`<h3 class="modal-title">Jupytext configuration</h3>`)
                 .on('mousedown', function () { $('.modal').draggable({ handle: '.modal-header' }); })
                 .appendTo(dialog_content);
 
-            console.log("comment_magics status", Jupyter.notebook.metadata.jupytext.comment_magics);
-            var comment_magics_default = (!("comment_magics" in Jupyter.notebook.metadata.jupytext)) ? "checked" : "";
-            var comment_magics_true = (Jupyter.notebook.metadata.jupytext.comment_magics === true) ? "checked" : "";
-            var comment_magics_false = (Jupyter.notebook.metadata.jupytext.comment_magics === false) ? "checked" : "";
+            var selected_formats = ("formats" in jpmd && (typeof jpmd.formats === 'string' || jpmd.formats instanceof String)) ? jpmd.formats.split(',') : []
+            var text_formats_available = [script_ext.substr(1) + ':light', script_ext.substr(1) + ':percent'];
+            if (script_ext === '.py')
+                text_formats_available.push('py:sphinx');
+            else if (script_ext === '.r')
+                text_formats_available.push('r:spin');
+
+            if (notebook_ext === 'ipynb')
+                text_formats_available.push('md', 'Rmd');
+            else if (notebook_ext === 'md')
+                text_formats_available = ['md']
+            else if (notebook_ext === 'rmd')
+                text_formats_available = ['Rmd'];
+
+            var normalize_format = function (fmt) {
+                if (fmt.startsWith('.'))
+                    fmt = fmt.substr(1)
+                if (fmt.startsWith('md:'))
+                    return 'md'
+                if (fmt.startsWith('Rmd:'))
+                    return 'Rmd'
+                return fmt
+            }
+
+            selected_formats = selected_formats.map(normalize_format).filter(x => text_formats_available.includes(x))
+            var selected_formats_not_ipynb = selected_formats.filter(x => x != 'ipynb')
+
+            var formats_ipynb_readonly = (notebook_ext === 'ipynb') ? "disabled" : "";
+            var formats_ipynb = (notebook_ext === 'ipynb' || ("formats" in jpmd && selected_formats.includes('ipynb'))) ? "checked" : "";
+            var formats_text = (notebook_ext != 'ipynb' || ("formats" in jpmd && selected_formats_not_ipynb)) ? "checked" : "";
+            var formats_text_readonly = (notebook_ext === 'ipynb') ? "" : "disabled";
+
+            var formats_text_select = $('<select/>')
+                .attr('id', 'jupytext-formats-text-select')
+                .attr('name', 'jupytext-formats');
+
+            var format_description = function (name) {
+                if (name.includes(':'))
+                    return script_language + ' script (' + name.split(':').pop() + ' format)';
+                if (name == 'md')
+                    return 'Markdown document'
+                if (name == 'Rmd')
+                    return 'R Markdown notebook'
+            }
+
+            for (var i = 0; i < text_formats_available.length; i++) {
+                var name = text_formats_available[i];
+                // TODO: can we factorize the below?
+                if (selected_formats_not_ipynb.includes(name))
+                    formats_text_select.append($('<option/>').attr('name', "jupytext-formats").attr('value', name).attr('selected', 'selected').text(format_description(name)));
+                else
+                    formats_text_select.append($('<option/>').attr('name', "jupytext-formats").attr('value', name).text(format_description(name)));
+            }
+
+            //console.log("comment_magics status", jpmd.comment_magics);
+            var comment_magics_default = (!("comment_magics" in jpmd)) ? "checked" : "";
+            var comment_magics_true = (jpmd.comment_magics === true) ? "checked" : "";
+            var comment_magics_false = (jpmd.comment_magics === false) ? "checked" : "";
 
             $('<div>')
                 .addClass('modal-body')
-                .append('<h3>Notebook formats</h3>')
-                .append(`<input type="checkbox" id="jupytext-formats-ipynb"/> <label>Jupyter notebook (.ipynb)</label><br>
-                         <input type="checkbox" id="jupytext-formats-script"/> <label>Python script (.py)</label> with format
-                            <select id="jupytext-formats-script-format">
-                                <option value="light">light</option>
-                                <option value="percent">percent</option>
-                                <option value="spin">spin (.R only)</option>
-                                <option value="sphinx">sphinx (.py only)</option>
-                            </select><br>
-                    <input type="checkbox" id="jupytext-formats-markdown"/> <label>Markdown document (.md)</label> <br>
-                    <input type="checkbox" id="jupytext-formats-Rmarkdown"/> <label>R Markdown notebook (.Rmd)</label>`)
-                // TODO: Replace 'Python script (.py)' above with a value that is taken from Jupyter.notebook.metadata.language_info
-                // TODO (later): spin/sphinx only available for .R or .py formats
-                // TODO: Set the initial values above from Jupyter.notebook.metadata.jupytext.formats
-                // TODO: Create or update Jupyter.notebook.metadata.jupytext.formats to match the selected values
+                .append('<h4>Notebook formats</h4>')
+                .append(`<div>Use <a href=https://github.com/mwouts/jupytext>Jupytext</a> and save this notebook as:</div>`)
+                .append(`<input type="checkbox" id="jupytext-formats-ipynb" name="jupytext-formats" ${formats_ipynb_readonly} ${formats_ipynb}/>
+                         <label>A traditional Jupyter notebook (.ipynb extension)</label><br>`)
+                .append(`<input type="checkbox" id="jupytext-formats-text" name="jupytext-formats" ${formats_text_readonly} ${formats_text}/>
+                         <label>A </label>`)
+                .append(formats_text_select)
+                .append(`<div>Hint: Text notebooks are great for version control and for refactoring. You can edit the text notebooks
+                outside of Jupyter. Refresh the notebook in Jupyter to load the updated input cells. 
+                Output cells are preserved if you save to both text and ipynb formats.</div>`)
 
-                .append(`<h3>Jupyter magic commands</h3>
-                    <input type="radio" id="jupytext-comment-magics-default" name="jupytext-comment-magics" value="default" ${comment_magics_default}>Default (commented in scripts and Rmd)
+                .append(`<h4>Jupyter magic commands</h4>
+                <input type="radio" id="jupytext-comment-magics-default" name="jupytext-comment-magics" value="default" ${comment_magics_default}>Default (commented in scripts and Rmd)
                     <input type="radio" id="jupytext-comment-magics-true" name="jupytext-comment-magics" value="true" ${comment_magics_true}>Commented
                     <input type="radio" id="jupytext-comment-magics-false" name="jupytext-comment-magics" value="false" ${comment_magics_false}>Not commented`)
-
-                .append('<h3>Metadata filters</h3>')
-                .append('<h4>Notebook metadata</h4>')
-                // TODO (Later): Choose between default/all/none/checklist filled with keys of Jupyter.notebook.metadata
-                .append(`<input type="radio" name="jupytext-metadata-filter-notebook" value="default" checked="true">Default
-                <input type="radio" name="jupytext-metadata-filter-notebook" value="none">None
-                <input type="radio" name="jupytext-metadata-filter-notebook" value="all">All`)
-                .append('<h4>Cell metadata</h4>')
-                // TODO (Later): Choose between default/all/none/checklist filled with keys of metatadata in one of Jupyter.notebook.cells
-                .append(`<input type="radio" name="jupytext-metadata-filter-cell" value="default" checked="true">Default:
-                <input type="radio" name="jupytext-metadata-filter-cell" value="none">None
-                <input type="radio" name="jupytext-metadata-filter-cell" value="all">All`)
-
-                .append('<h3>Debug: display jupytext metadata</h3>')
-                .append($('<div id="jupytext-metadata"/>').html(JSON.stringify(Jupyter.notebook.metadata.jupytext)))
 
                 .appendTo(dialog_content);
             $('<div class="modal-footer">')
@@ -97,17 +141,7 @@ define([
             modal.on('shown.bs.modal', function () {
                 setTimeout(function () {
                     dialog_content.find('.modal-footer button').last().focus();
-                    $("#jupytext-formats-ipynb").on("change", function () {
-                        console.log("jupytext-formats-ipynb changed");
-                    });
-                    // see this tutorial for selected value https://www.codexworld.com/how-to/get-text-value-of-selected-option-using-jquery/
-                    $('#jupytext-dropdownList').on('change', function () {
-                        var optionValue = $(this).val();
-                        alert(optionValue)
-                        //var optionText = $('#dropdownList option[value="'+optionValue+'"]').text();
-                        // var optionText = $("#dropdownList option:selected").text();
-                        // alert("Selected Option Text: "+optionText);
-                    });
+                    save_jupytext_formats_on_change();
                     save_comment_magics_on_change();
                 }, 0);
             });
@@ -115,17 +149,41 @@ define([
             return modal.modal({ backdrop: 'static' });
         };
 
+        var save_jupytext_formats_on_change = function () {
+            // TODO: this does not work yet when the dropdown list is changed.
+            // And: selecting an entry in the dropdown list should check the 'text' checkbox.
+            $('input[name=jupytext-formats]').on("change", function () {
+                console.log("input[name=jupytext-formats] CHANGED");
+                var format_ipynb = $('#jupytext-formats-ipynb').prop('checked')
+                var format_text = $('#jupytext-formats-text').prop('checked')
+
+                if (format_ipynb && format_text) {
+                    var format_selected = $('#jupytext-formats-text-select option:selected')[0].value
+                    Jupyter.notebook.metadata.jupytext.formats = 'ipynb,' + format_selected;
+                    console.log('Jupytext formats:' + Jupyter.notebook.metadata.jupytext.formats)
+                }
+                else
+                {
+                    delete Jupyter.notebook.metadata.jupytext['formats']
+                    console.log('Jupytext formats: null')
+                }
+
+                Jupyter.notebook.set_dirty();
+            });
+        }
+
         var save_comment_magics_on_change = function () {
-            $('input[name=jupytext-comment-magics]').on("change", function(){
-                console.log("input[name=jupytext-comment-magics] CHANGED");
-                if($('#jupytext-comment-magics-default').prop('checked')){
+            $('input[name=jupytext-comment-magics]').on("change", function () {
+                // console.log("input[name=jupytext-comment-magics] CHANGED");
+                if ($('#jupytext-comment-magics-default').prop('checked')) {
                     delete Jupyter.notebook.metadata.jupytext["comment_magics"];
-                } else if($('#jupytext-comment-magics-true').prop('checked')){
+                } else if ($('#jupytext-comment-magics-true').prop('checked')) {
                     Jupyter.notebook.metadata.jupytext.comment_magics = true;
-                } else if($('#jupytext-comment-magics-false').prop('checked')){
+                } else if ($('#jupytext-comment-magics-false').prop('checked')) {
                     Jupyter.notebook.metadata.jupytext.comment_magics = false;
                 }
-                Jupyter.notebook.save_notebook();
+
+                Jupyter.notebook.set_dirty();
             });
         }
 
